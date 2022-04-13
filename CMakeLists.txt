@@ -18,7 +18,7 @@ find_package(MPI REQUIRED)
 
 add_executable(gol gol.cpp)
 
-set_target_properties(gol PROPERTIES CUDA_ARCHITECTURES "35")
+set_target_properties(gol PROPERTIES CUDA_ARCHITECTURES "70")
 
 # This is the only thing required to set up compiler/linker flags
 target_link_libraries(gol Kokkos::kokkos)
