@@ -47,6 +47,7 @@
 #include <cstdio>
 #include <vector>
 #include <mpi.h>
+#include <math.h>
 
 struct CountFunctor {
   KOKKOS_FUNCTION void operator()(const long i, long& lcount) const {
@@ -79,74 +80,49 @@ void printState(int *m, int N){
     }
 }
 
-// KOKKOS_FUNCTION void ComputeCellState(int * current, int * next, int N, int row, int col){
-//         if (row < N && col < N) {
+void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::CudaSpace> current, int nrow, int ncol){
 
-//         int neighbors = 0;
-        
-//         for(int i=-1; i<=1; i++){ //Calculate total neighbors
-//             for(int j=-1; j<=1; j++){
-//                     if(!(i == 0 && j == 0)){ //Avoid checking self
-//                         int tempR, tempC;
-//                         tempR = row + i;
-//                         tempC = col + j;
-//                         if(tempR < 0){
-//                             tempR = tempR + N;
-//                         }
-//                         else{
-//                             tempR = tempR % N;
-//                         }
-//                         if(tempC < 0){
-//                             tempC = tempC + N;
-//                         }
-//                         else{
-//                             tempC = tempC % N;
-//                         }
-//                         // neighbors += current[tempR][(tempC % N)];
-//                         neighbors += current[(N * tempR) + tempC];
-//                     }
-//             }
-//         }
-//         if(current[(N * row) + col] == 1){ //If cell is alive
-//             if(neighbors < 2){
-//                 next[(N * row) + col] = 0; //Cell dies because of solitude
-//             }
-//             else if(neighbors < 4){
-//                 next[(N * row) + col] = 1; //Cell survives
-//             }
-//             else if(neighbors >= 4){
-//                 next[(N * row) + col] = 0; //Cell dies because of overpopulation
-//             }
-//         }
-//         else{
-//             if(neighbors == 3){
-//                 next[(N * row) + col] = 1;//Cell is born
-//             }
-//             else{
-//                 next[(N * row) + col] = 0;//No cell is born
-//             }
-//         }
-//     }
-// }
+}
 
 int main(int argc, char* argv[]) {
-  int MPI_Init(int *argc, char ***argv);
-  Kokkos::initialize(argc, argv);
-  {
-  Kokkos::DefaultExecutionSpace::print_configuration(std::cout);
+    MPI_Init(&argc, &argv);
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int nProc;
+    MPI_Comm_size(MPI_COMM_WORLD, &nProc);
+    if(!(sqrt(nProc) * sqrt(nProc) == nProc)){
+        if(rank == 0){
+            std::cerr << "N processes must be a square value" << std::endl;
+        }
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+    Kokkos::initialize(argc, argv);
+    {
+    Kokkos::DefaultExecutionSpace::print_configuration(std::cout);
 
   // N = dims for matrices
     int N = atoi(argv[1]);
     int iter = atoi(argv[2]);
 
-    Kokkos::View<int**, Kokkos::CudaSpace> current("current", N, N);
-    Kokkos::View<int**, Kokkos::CudaSpace> next("next", N, N);
+    if(N%nProc !=0){
+        std::cerr << "The processes don't divide N evenly" << endl;
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
 
-    // Kokkos::View<int**, Kokkos::CudaSpace> current = v0;
-    // Kokkos::View<int**, Kokkos::CudaSpace> next = v1;
+    int M = sqrt(nProc);
+    int dims[2] = {M, M};
+    int periodic[2] = {1,1};
+    MPI_Comm comm;
+    MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periodic, 0, &comm);
+
+    int localN = N/nProc;
+
+    Kokkos::View<int**, Kokkos::CudaSpace> current("current", localN+2, localN+2);
+    Kokkos::View<int**, Kokkos::CudaSpace> next("next", localN+2, localN+2);
 
     for(int i=0; i<iter; i++){
-        Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({0,0}, {N,N}), 
+
+        Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({1,1}, {localN+1,localN+1}), 
         KOKKOS_LAMBDA(const int row, const int col){
             int neighbors = 0;
             for(int i=-1; i<=1; i++){ //Calculate total neighbors
@@ -155,18 +131,18 @@ int main(int argc, char* argv[]) {
                         int tempR, tempC;
                         tempR = row + i;
                         tempC = col + j;
-                        if(tempR < 0){
-                            tempR = tempR + N;
-                        }
-                        else{
-                            tempR = tempR % N;
-                        }
-                        if(tempC < 0){
-                            tempC = tempC + N;
-                        }
-                        else{
-                            tempC = tempC % N;
-                        }
+                        // if(tempR < 0){
+                        //     tempR = tempR + N;
+                        // }
+                        // else{
+                        //     tempR = tempR % N;
+                        // }
+                        // if(tempC < 0){
+                        //     tempC = tempC + N;
+                        // }
+                        // else{
+                        //     tempC = tempC % N;
+                        // }
                         neighbors += current(tempR, tempC);
                     }
                 }
@@ -192,7 +168,7 @@ int main(int argc, char* argv[]) {
             }
         });
         //Kokkos::deep_copy(current, next);
-        Kokkos::View<int**, Kokkos::CudaSpace> temp("tempView", N, N);
+        Kokkos::View<int**, Kokkos::CudaSpace> temp("tempView", localN+2, localN+2);
         temp = current;
         current = next;
         next = temp;
@@ -206,6 +182,8 @@ int main(int argc, char* argv[]) {
 //     });
 //     std::memcpy(current, next, sizeof(int) * N * N);
 //   }
+  MPI_Comm_free(&comm);
   }
   Kokkos::finalize();
+  MPI_Finalize();
 }
