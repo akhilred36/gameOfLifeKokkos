@@ -48,6 +48,7 @@
 #include <vector>
 #include <mpi.h>
 #include <math.h>
+#include <vector>
 
 struct CountFunctor {
   KOKKOS_FUNCTION void operator()(const long i, long& lcount) const {
@@ -63,12 +64,18 @@ void init_matrix(int * m, int size){
     }
 }
 
-void setActive(int *m, int argc, char ** argv){
+void setActive(int *m, int argc, char ** argv, int localN){
     int len = (argc - 2);
     for(int i=3; i < len; i+=2){
-        m[atoi(argv[1])*atoi(argv[i]) + atoi(argv[i + 1])] = 1;
+        m[atoi(argv[i]) + localN*atoi(argv[i + 1])] = 1;
     }
 }
+// void setActive(Kokkos::View<int **> view, int argc, char ** argv){
+//     int len = (argc - 2);
+//     for(int i=3; i < len; i+=2){
+//         view[atoi(argv[1])*atoi(argv[i])atoi(argv[i + 1])] = 1;
+//     }
+// }
 
 void printState(int *m, int N){
     using namespace std;
@@ -81,7 +88,95 @@ void printState(int *m, int N){
 }
 
 void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::CudaSpace> current, int nrow, int ncol){
+    int rank; 
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    int coordinates[2];
+    MPI_Cart_coords(comm, rank, 2, coordinates);
+    int dim[2];
+    MPI_Cart_get(comm, 2, dim, NULL, NULL);
+    int ranks[8];
+    int counter = 0;
+    for(int i=-1; i<2; i++){
+        for(int j=-1; j<2; j++){
+            if(!(i==0 && j==0)){
+                int tempR = coordinates[0] + i;
+                int tempC = coordinates[1] + j;
+                if(tempR < 0){
+                    tempR = tempR + dim[0];
+                }
+                else{
+                    tempR = tempR % dim[0];
+                }
+                if(tempC < 0){
+                    tempC = tempC + dim[0];
+                }
+                else{
+                    tempC = tempC % dim[0];
+                }
+                int tempRank;
+                int tempCoords[2] = {tempR, tempC};
+                MPI_Cart_rank(comm, tempCoords, &tempRank);
+                ranks[counter] = tempRank;
+                counter++;
+            }            
+        }
+    }
+    //Starts at bottom left, goes right, then moves up and goes right...
+    int * viewData;
+    MPI_Request requests[16];
+    viewData = current.data();
+    //Bottom Left
+    MPI_Irecv(viewData, 1, MPI_INT, ranks[0], 0, comm, &requests[0]);
+    MPI_Isend(viewData + dim[0] + 1, 1, MPI_INT, ranks[0], 0, comm, &requests[1]);
 
+    //Bottom
+    MPI_Irecv(viewData + 1, dim[0] - 2, MPI_INT, ranks[1], 0, comm, &requests[2]);
+    MPI_Isend(viewData + dim[0] + 1, dim[0] - 2, MPI_INT, ranks[1], 0, comm, &requests[3]);
+
+    //Bottom Right
+    MPI_Irecv(viewData + dim[0] - 1, 1, MPI_INT, ranks[2], 0, comm, &requests[4]);
+    MPI_Isend(viewData + 2*dim[0] - 2, 1, MPI_INT, ranks[2], 0, comm, &requests[5]);
+
+    //Left
+    int * sendLeftBuffer = (int *) malloc(sizeof(int) * dim[0] - 2);
+    int * recvLeftBuffer = (int *) malloc(sizeof(int) * dim[0] - 2);
+    MPI_Irecv(recvLeftBuffer, dim[0] - 2, MPI_INT, ranks[3], 0, comm, &requests[6]);
+    for(int i=1; i<(dim[0] - 2); i++){
+        current(i, 0) = recvLeftBuffer[i];
+    }
+    for(int i=1; i<(dim[0] - 2); i++){
+        sendLeftBuffer[i] = current(i, 1);
+    }
+    MPI_Isend(sendLeftBuffer, dim[0] - 2, MPI_INT, ranks[3], 0, comm, &requests[7]);
+    
+
+    //Right
+    int * sendRightBuffer = (int *) malloc(sizeof(int) * dim[0] - 2);
+    int * recvRightBuffer = (int *) malloc(sizeof(int) * dim[0] - 2);
+    MPI_Irecv(recvRightBuffer, dim[0] - 2, MPI_INT, ranks[4], 0, comm, &requests[8]);
+    for(int i=1; i<(dim[0] - 2); i++){
+        current(i, dim[0] - 1) = recvRightBuffer[i];
+    }
+    for(int i=1; i<(dim[0] - 2); i++){
+        sendRightBuffer[i] = current(i , dim[0] - 2);
+    }
+    MPI_Isend(sendRightBuffer, dim[0] - 2, MPI_INT, ranks[4], 0, comm, &requests[9]);
+
+    //Top Left
+    MPI_Irecv(viewData + (dim[0]*(dim[0] - 1)), 1, MPI_INT, ranks[5], 0, comm, &requests[10]);
+    MPI_Isend(viewData + (dim[0]*(dim[0] - 2)) + 1, 1, MPI_INT, ranks[5], 0, comm, &requests[11]);
+    //Top
+    MPI_Irecv(viewData + (dim[0]*(dim[0] - 1)) + 1, dim[0] - 2, MPI_INT, ranks[6], 0, comm, &requests[12]);
+    MPI_Isend(viewData + (dim[0]*(dim[0] - 2)) + 1, dim[0] - 2, MPI_INT, ranks[6], 0, comm, &requests[13]);
+    //Top Right
+    MPI_Irecv(viewData + dim[0]*dim[0] - 1, 1, MPI_INT, ranks[7], 0, comm, &requests[14]);
+    MPI_Isend(viewData + (dim[0]*(dim[0] - 1)) - 1, 1, MPI_INT, ranks[7], 0, comm, &requests[15]);
+
+    MPI_Waitall(16, requests, MPI_STATUSES_IGNORE);
+    free(sendLeftBuffer);
+    free(sendRightBuffer);
+    free(recvLeftBuffer);
+    free(recvRightBuffer);
 }
 
 int main(int argc, char* argv[]) {
@@ -100,12 +195,14 @@ int main(int argc, char* argv[]) {
     {
     Kokkos::DefaultExecutionSpace::print_configuration(std::cout);
 
+    std::cout << argv[0] << std::endl;
+
   // N = dims for matrices
     int N = atoi(argv[1]);
     int iter = atoi(argv[2]);
 
     if(N%nProc !=0){
-        std::cerr << "The processes don't divide N evenly" << endl;
+        std::cerr << "The processes don't divide N evenly" << std::endl;
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
@@ -115,11 +212,17 @@ int main(int argc, char* argv[]) {
     MPI_Comm comm;
     MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periodic, 0, &comm);
 
-    int localN = N/nProc;
+    int localN = N/sqrt(nProc);
 
     Kokkos::View<int**, Kokkos::CudaSpace> current("current", localN+2, localN+2);
     Kokkos::View<int**, Kokkos::CudaSpace> next("next", localN+2, localN+2);
 
+    setActive(current.data(), argc, argv, localN);
+    std::cout << "Passed!" << std::endl;
+    if(atoi(argv[argc - 1])){
+        std::cout << "Current: " << std::endl;
+        printState(current.data(), localN+2);
+    }
     for(int i=0; i<iter; i++){
 
         Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({1,1}, {localN+1,localN+1}), 
@@ -174,14 +277,6 @@ int main(int argc, char* argv[]) {
         next = temp;
     }
 
-    // ComputeCellState gol;
-
-//   for(int i=0; i<iter; i++){
-//     Kokkos::parallel_for(N, KOKKOS_LAMBDA (const int& i) {
-//         gol(current, next, N, rowColPairs[i].first, rowColPairs[i].second);
-//     });
-//     std::memcpy(current, next, sizeof(int) * N * N);
-//   }
   MPI_Comm_free(&comm);
   }
   Kokkos::finalize();
