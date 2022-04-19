@@ -49,6 +49,9 @@
 #include <mpi.h>
 #include <math.h>
 #include <vector>
+#include <fstream>
+#include <string>
+
 
 struct CountFunctor {
   KOKKOS_FUNCTION void operator()(const long i, long& lcount) const {
@@ -64,18 +67,18 @@ void init_matrix(int * m, int size){
     }
 }
 
-void setActive(int *m, int argc, char ** argv, int localN){
-    int len = (argc - 2);
-    for(int i=3; i < len; i+=2){
-        m[atoi(argv[i]) + localN*atoi(argv[i + 1])] = 1;
-    }
-}
-// void setActive(Kokkos::View<int **> view, int argc, char ** argv){
+// void setActive(int *m, int argc, char ** argv, int localN){
 //     int len = (argc - 2);
 //     for(int i=3; i < len; i+=2){
-//         view[atoi(argv[1])*atoi(argv[i])atoi(argv[i + 1])] = 1;
+//         m[atoi(argv[i]) + localN*atoi(argv[i + 1])] = 1;
 //     }
 // }
+void setActive(Kokkos::View<int **, Kokkos::HostSpace> view, int argc, char ** argv){
+    int len = (argc - 2);
+    for(int i=3; i < len; i+=2){
+        view(atoi(argv[i]), atoi(argv[i + 1])) = 1;
+    }
+}
 
 void printState(int *m, int N){
     using namespace std;
@@ -86,6 +89,36 @@ void printState(int *m, int N){
         std::cout << "\n";
     }
 }
+
+void writeState(int *m, int iter, std::string path, int rank, int size){
+    using namespace std;
+    string fName = path;
+    fName.append(to_string(rank));
+    fName.append("_");
+    fName.append(to_string(iter));
+    
+    ofstream file;
+    file.open(fName.c_str());
+    for(int i=0; i<size; i++){
+        for(int j=0; j<size; j++){
+            if(j == size - 1){
+                file << m[i*size + j] << "\n";
+            }
+            else file << m[i*size + j] << " ";
+        }
+    }
+    file.close();
+}
+
+// void printState(Kokkos::View<int **, Kokkos::CudaSpace> view, int size){
+//     for(int i=0; i<size; i++){
+//         for(int j=0; j<size; j++){
+//             std::cout << i << ", " << j << "\n";
+//             std::cout << view(i, j) << " ";
+//         }
+//         std::cout << "\n";
+//     }
+// }
 
 void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::CudaSpace> current, int nrow, int ncol){
     int rank; 
@@ -214,12 +247,20 @@ int main(int argc, char* argv[]) {
 
     int localN = N/sqrt(nProc);
 
-    Kokkos::View<int**, Kokkos::CudaSpace> current("current", localN+2, localN+2);
-    Kokkos::View<int**, Kokkos::CudaSpace> next("next", localN+2, localN+2);
+    //Device Views
+    Kokkos::View<int**, Kokkos::CudaUVMSpace> current("current", localN+2, localN+2);
+    Kokkos::View<int**, Kokkos::CudaUVMSpace> next("next", localN+2, localN+2);
 
-    setActive(current.data(), argc, argv, localN);
+    //Host Views
+    Kokkos::View<int**, Kokkos::HostSpace> currentMirror("currentMirror", localN+2, localN+2);
+    
+    setActive(currentMirror, argc, argv);
+    Kokkos::deep_copy(current, currentMirror);
+
     std::cout << "Passed!" << std::endl;
-    if(atoi(argv[argc - 1])){
+
+    bool print = atoi(argv[argc - 1]);
+    if(print){
         std::cout << "Current: " << std::endl;
         printState(current.data(), localN+2);
     }
@@ -271,10 +312,18 @@ int main(int argc, char* argv[]) {
             }
         });
         //Kokkos::deep_copy(current, next);
-        Kokkos::View<int**, Kokkos::CudaSpace> temp("tempView", localN+2, localN+2);
+        Kokkos::View<int**, Kokkos::CudaUVMSpace> temp("tempView", localN+2, localN+2);
         temp = current;
         current = next;
         next = temp;
+
+        //Write views to storage
+        if(print){
+            int rank;
+            MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+            std::string path = "../data/";
+            writeState(current.data(), i, path, rank, localN+2);
+        }
     }
 
   MPI_Comm_free(&comm);
