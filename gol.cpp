@@ -73,7 +73,7 @@ void init_matrix(int * m, int size){
 //         m[atoi(argv[i]) + localN*atoi(argv[i + 1])] = 1;
 //     }
 // }
-void setActive(Kokkos::View<int **, Kokkos::HostSpace> view, int argc, char ** argv){
+void setActive(Kokkos::View<int **, Kokkos::LayoutRight, Kokkos::HostSpace> view, int argc, char ** argv){
     int len = (argc - 2);
     for(int i=3; i < len; i+=2){
         view(atoi(argv[i]), atoi(argv[i + 1])) = 1;
@@ -110,6 +110,10 @@ void writeState(int *m, int iter, std::string path, int rank, int size){
     file.close();
 }
 
+void stitchPrint(std::string path){
+    
+}
+
 // void printState(Kokkos::View<int **, Kokkos::CudaSpace> view, int size){
 //     for(int i=0; i<size; i++){
 //         for(int j=0; j<size; j++){
@@ -120,13 +124,15 @@ void writeState(int *m, int iter, std::string path, int rank, int size){
 //     }
 // }
 
-void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::CudaSpace> current, int nrow, int ncol){
+void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> current, int nrow, int ncol){
     int rank; 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     int coordinates[2];
     MPI_Cart_coords(comm, rank, 2, coordinates);
     int dim[2];
-    MPI_Cart_get(comm, 2, dim, NULL, NULL);
+    int dim_1[2];
+    int dim_2[2];
+    MPI_Cart_get(comm, 2, dim, dim_1, dim_2);
     int ranks[8];
     int counter = 0;
     for(int i=-1; i<2; i++){
@@ -160,50 +166,53 @@ void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::CudaSpace> curren
     viewData = current.data();
     //Bottom Left
     MPI_Irecv(viewData, 1, MPI_INT, ranks[0], 0, comm, &requests[0]);
-    MPI_Isend(viewData + dim[0] + 1, 1, MPI_INT, ranks[0], 0, comm, &requests[1]);
+    MPI_Isend(viewData + ncol + 3, 1, MPI_INT, ranks[0], 0, comm, &requests[1]);
 
     //Bottom
-    MPI_Irecv(viewData + 1, dim[0] - 2, MPI_INT, ranks[1], 0, comm, &requests[2]);
-    MPI_Isend(viewData + dim[0] + 1, dim[0] - 2, MPI_INT, ranks[1], 0, comm, &requests[3]);
+    MPI_Irecv(viewData + 1, ncol, MPI_INT, ranks[1], 0, comm, &requests[2]);
+    MPI_Isend(viewData + ncol + 3, ncol, MPI_INT, ranks[1], 0, comm, &requests[3]);
 
     //Bottom Right
-    MPI_Irecv(viewData + dim[0] - 1, 1, MPI_INT, ranks[2], 0, comm, &requests[4]);
-    MPI_Isend(viewData + 2*dim[0] - 2, 1, MPI_INT, ranks[2], 0, comm, &requests[5]);
+    MPI_Irecv(viewData + ncol + 1, 1, MPI_INT, ranks[2], 0, comm, &requests[4]);
+    MPI_Isend(viewData + 2*(ncol + 2) - 2, 1, MPI_INT, ranks[2], 0, comm, &requests[5]);
 
     //Left
-    int * sendLeftBuffer = (int *) malloc(sizeof(int) * dim[0] - 2);
-    int * recvLeftBuffer = (int *) malloc(sizeof(int) * dim[0] - 2);
-    MPI_Irecv(recvLeftBuffer, dim[0] - 2, MPI_INT, ranks[3], 0, comm, &requests[6]);
-    for(int i=1; i<(dim[0] - 2); i++){
+    int * sendLeftBuffer = (int *) malloc(sizeof(int) * nrow);
+    int * recvLeftBuffer = (int *) malloc(sizeof(int) * nrow);
+    MPI_Irecv(recvLeftBuffer, nrow, MPI_INT, ranks[3], 0, comm, &requests[6]);
+    //Add Kokkos parallel for 
+    for(int i=1; i<nrow; i++){
         current(i, 0) = recvLeftBuffer[i];
     }
-    for(int i=1; i<(dim[0] - 2); i++){
+    for(int i=1; i<nrow; i++){
         sendLeftBuffer[i] = current(i, 1);
     }
-    MPI_Isend(sendLeftBuffer, dim[0] - 2, MPI_INT, ranks[3], 0, comm, &requests[7]);
+    MPI_Isend(sendLeftBuffer, nrow, MPI_INT, ranks[3], 0, comm, &requests[7]);
     
 
     //Right
-    int * sendRightBuffer = (int *) malloc(sizeof(int) * dim[0] - 2);
-    int * recvRightBuffer = (int *) malloc(sizeof(int) * dim[0] - 2);
-    MPI_Irecv(recvRightBuffer, dim[0] - 2, MPI_INT, ranks[4], 0, comm, &requests[8]);
-    for(int i=1; i<(dim[0] - 2); i++){
-        current(i, dim[0] - 1) = recvRightBuffer[i];
+    int * sendRightBuffer = (int *) malloc(sizeof(int) * nrow);
+    int * recvRightBuffer = (int *) malloc(sizeof(int) * nrow);
+    MPI_Irecv(recvRightBuffer, nrow, MPI_INT, ranks[4], 0, comm, &requests[8]);
+    //Add Kokkos parallel for 
+    for(int i=1; i<(nrow); i++){
+        current(i, nrow + 1) = recvRightBuffer[i];
     }
-    for(int i=1; i<(dim[0] - 2); i++){
-        sendRightBuffer[i] = current(i , dim[0] - 2);
+    //Add Kokkos parallel for 
+    for(int i=1; i<(nrow); i++){
+        sendRightBuffer[i] = current(i , nrow);
     }
-    MPI_Isend(sendRightBuffer, dim[0] - 2, MPI_INT, ranks[4], 0, comm, &requests[9]);
+    MPI_Isend(sendRightBuffer, nrow, MPI_INT, ranks[4], 0, comm, &requests[9]);
 
     //Top Left
-    MPI_Irecv(viewData + (dim[0]*(dim[0] - 1)), 1, MPI_INT, ranks[5], 0, comm, &requests[10]);
-    MPI_Isend(viewData + (dim[0]*(dim[0] - 2)) + 1, 1, MPI_INT, ranks[5], 0, comm, &requests[11]);
+    MPI_Irecv(viewData + (nrow + 1)*(ncol + 2), 1, MPI_INT, ranks[5], 0, comm, &requests[10]);
+    MPI_Isend(viewData + (nrow)*(ncol + 2) + 1, 1, MPI_INT, ranks[5], 0, comm, &requests[11]);
     //Top
-    MPI_Irecv(viewData + (dim[0]*(dim[0] - 1)) + 1, dim[0] - 2, MPI_INT, ranks[6], 0, comm, &requests[12]);
-    MPI_Isend(viewData + (dim[0]*(dim[0] - 2)) + 1, dim[0] - 2, MPI_INT, ranks[6], 0, comm, &requests[13]);
+    MPI_Irecv(viewData + (nrow + 1)*(ncol + 2) + 1, ncol, MPI_INT, ranks[6], 0, comm, &requests[12]);
+    MPI_Isend(viewData + (nrow)*(ncol + 2) + 1, ncol, MPI_INT, ranks[6], 0, comm, &requests[13]);
     //Top Right
-    MPI_Irecv(viewData + dim[0]*dim[0] - 1, 1, MPI_INT, ranks[7], 0, comm, &requests[14]);
-    MPI_Isend(viewData + (dim[0]*(dim[0] - 1)) - 1, 1, MPI_INT, ranks[7], 0, comm, &requests[15]);
+    MPI_Irecv(viewData + (nrow + 2)*(ncol + 2) - 1, 1, MPI_INT, ranks[7], 0, comm, &requests[14]);
+    MPI_Isend(viewData + (nrow + 1)*(ncol + 2) - 2, 1, MPI_INT, ranks[7], 0, comm, &requests[15]);
 
     MPI_Waitall(16, requests, MPI_STATUSES_IGNORE);
     free(sendLeftBuffer);
@@ -248,12 +257,12 @@ int main(int argc, char* argv[]) {
     int localN = N/sqrt(nProc);
 
     //Device Views
-    Kokkos::View<int**, Kokkos::CudaUVMSpace> current("current", localN+2, localN+2);
-    Kokkos::View<int**, Kokkos::CudaUVMSpace> next("next", localN+2, localN+2);
+    Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> current("current", localN+2, localN+2);
+    Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> next("next", localN+2, localN+2);
 
     //Host Views
-    Kokkos::View<int**, Kokkos::HostSpace> currentMirror("currentMirror", localN+2, localN+2);
-    
+    Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> currentMirror("currentMirror", localN+2, localN+2);
+
     setActive(currentMirror, argc, argv);
     Kokkos::deep_copy(current, currentMirror);
 
@@ -265,7 +274,7 @@ int main(int argc, char* argv[]) {
         printState(current.data(), localN+2);
     }
     for(int i=0; i<iter; i++){
-
+        exchangeGhosts(comm, current, localN, localN);
         Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({1,1}, {localN+1,localN+1}), 
         KOKKOS_LAMBDA(const int row, const int col){
             int neighbors = 0;
@@ -275,18 +284,7 @@ int main(int argc, char* argv[]) {
                         int tempR, tempC;
                         tempR = row + i;
                         tempC = col + j;
-                        // if(tempR < 0){
-                        //     tempR = tempR + N;
-                        // }
-                        // else{
-                        //     tempR = tempR % N;
-                        // }
-                        // if(tempC < 0){
-                        //     tempC = tempC + N;
-                        // }
-                        // else{
-                        //     tempC = tempC % N;
-                        // }
+                        
                         neighbors += current(tempR, tempC);
                     }
                 }
@@ -312,7 +310,7 @@ int main(int argc, char* argv[]) {
             }
         });
         //Kokkos::deep_copy(current, next);
-        Kokkos::View<int**, Kokkos::CudaUVMSpace> temp("tempView", localN+2, localN+2);
+        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> temp("tempView", localN+2, localN+2);
         temp = current;
         current = next;
         next = temp;
@@ -323,6 +321,13 @@ int main(int argc, char* argv[]) {
             MPI_Comm_rank(MPI_COMM_WORLD, &rank);
             std::string path = "../data/";
             writeState(current.data(), i, path, rank, localN+2);
+        }
+    }
+    //Stitch and print
+    if(rank == 0){
+        if(print){
+            std::string path = "../data/";
+            stitchPrint(path);
         }
     }
 
