@@ -151,8 +151,8 @@ void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokk
     //TODO Add Kokkos parallel for 
     //pack left and right edges
     for(int i=1; i<=nrow; i++){
-        sendL[i-1] = current(i, 1);
-        sendR[i-1] = current(i , nrow);
+        sendL[i-1] = current(1, i);
+        sendR[i-1] = current(nrow, i);
     }
     MPI_Isend(sendL, nrow, MPI_INT, neighbors[3], 0, comm, &requests[7]);
 
@@ -177,8 +177,8 @@ void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokk
     //TODO Add Kokkos parallel for 
     //unpack
     for(int i=1; i<=nrow; i++){
-        current(i, 0)        = recvL[i-1];
-        current(i, nrow + 1) = recvR[i-1];
+        current(0, i)        = recvL[i-1]; // Left
+        current(nrow + 1, i) = recvR[i-1]; // Right 
     }
 }
 
