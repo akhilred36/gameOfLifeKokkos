@@ -1,4 +1,0 @@
-/users/aalasand/hpcResearch/gameOfLifeKokkos/build/CMakeFiles/rebuild_cache.dir
-/users/aalasand/hpcResearch/gameOfLifeKokkos/build/CMakeFiles/edit_cache.dir
-/users/aalasand/hpcResearch/gameOfLifeKokkos/build/CMakeFiles/test.dir
-/users/aalasand/hpcResearch/gameOfLifeKokkos/build/CMakeFiles/gol.dir

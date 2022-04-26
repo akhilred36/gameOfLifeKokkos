@@ -52,6 +52,10 @@
 #include <fstream>
 #include <string>
 
+const int MAXDIMS = 2;
+const int NNEIGHBORS = pow(3, MAXDIMS) - 1;
+//const int NREQUESTS = 2 * NNEIGHBORS;
+const int NREQUESTS = 2 * (pow(3, 2) - 1);
 
 struct CountFunctor {
   KOKKOS_FUNCTION void operator()(const long i, long& lcount) const {
@@ -82,7 +86,7 @@ void setActive(Kokkos::View<int **, Kokkos::LayoutRight, Kokkos::HostSpace> view
 
 void printState(int *m, int N){
     using namespace std;
-    for(int i=0; i<N; i++){
+    for(int i=N-1; i>=0; i--){
         for(int j=0; j<N; j++){
             std::cout << m[N*i + j] << " ";
         }
@@ -124,101 +128,58 @@ void stitchPrint(std::string path){
 //     }
 // }
 
-void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> current, int nrow, int ncol){
-    int rank; 
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    int coordinates[2];
-    MPI_Cart_coords(comm, rank, 2, coordinates);
-    int dim[2];
-    int dim_1[2];
-    int dim_2[2];
-    MPI_Cart_get(comm, 2, dim, dim_1, dim_2);
-    int ranks[8];
-    int counter = 0;
-    for(int i=-1; i<2; i++){
-        for(int j=-1; j<2; j++){
-            if(!(i==0 && j==0)){
-                int tempR = coordinates[0] + i;
-                int tempC = coordinates[1] + j;
-                if(tempR < 0){
-                    tempR = tempR + dim[0];
-                }
-                else{
-                    tempR = tempR % dim[0];
-                }
-                if(tempC < 0){
-                    tempC = tempC + dim[0];
-                }
-                else{
-                    tempC = tempC % dim[0];
-                }
-                int tempRank;
-                int tempCoords[2] = {tempR, tempC};
-                MPI_Cart_rank(comm, tempCoords, &tempRank);
-                ranks[counter] = tempRank;
-                counter++;
-            }            
-        }
-    }
+void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> current,
+                        int nrow, int ncol, int* neighbors, int* sendL, int* recvL, int* sendR, int* recvR,
+                        MPI_Request *requests) {
     //Starts at bottom left, goes right, then moves up and goes right...
     int * viewData;
-    MPI_Request requests[16];
     viewData = current.data();
     //Bottom Left
-    MPI_Irecv(viewData, 1, MPI_INT, ranks[0], 0, comm, &requests[0]);
-    MPI_Isend(viewData + ncol + 3, 1, MPI_INT, ranks[0], 0, comm, &requests[1]);
+    MPI_Irecv(viewData,            1, MPI_INT, neighbors[0], 0, comm, &requests[0]);
+    MPI_Isend(viewData + ncol + 3, 1, MPI_INT, neighbors[0], 0, comm, &requests[1]);
 
     //Bottom
-    MPI_Irecv(viewData + 1, ncol, MPI_INT, ranks[1], 0, comm, &requests[2]);
-    MPI_Isend(viewData + ncol + 3, ncol, MPI_INT, ranks[1], 0, comm, &requests[3]);
+    MPI_Irecv(viewData + 1,        ncol, MPI_INT, neighbors[1], 0, comm, &requests[2]);
+    MPI_Isend(viewData + ncol + 3, ncol, MPI_INT, neighbors[1], 0, comm, &requests[3]);
 
     //Bottom Right
-    MPI_Irecv(viewData + ncol + 1, 1, MPI_INT, ranks[2], 0, comm, &requests[4]);
-    MPI_Isend(viewData + 2*(ncol + 2) - 2, 1, MPI_INT, ranks[2], 0, comm, &requests[5]);
+    MPI_Irecv(viewData + ncol + 1,         1, MPI_INT, neighbors[2], 0, comm, &requests[4]);
+    MPI_Isend(viewData + 2*(ncol + 2) - 2, 1, MPI_INT, neighbors[2], 0, comm, &requests[5]);
 
     //Left
-    int * sendLeftBuffer = (int *) malloc(sizeof(int) * nrow);
-    int * recvLeftBuffer = (int *) malloc(sizeof(int) * nrow);
-    MPI_Irecv(recvLeftBuffer, nrow, MPI_INT, ranks[3], 0, comm, &requests[6]);
-    //Add Kokkos parallel for 
-    for(int i=1; i<nrow; i++){
-        current(i, 0) = recvLeftBuffer[i];
+    MPI_Irecv(recvL, nrow, MPI_INT, neighbors[3], 0, comm, &requests[6]);
+    //TODO Add Kokkos parallel for 
+    //pack left and right edges
+    for(int i=1; i<=nrow; i++){
+        sendL[i-1] = current(i, 1);
+        sendR[i-1] = current(i , nrow);
     }
-    for(int i=1; i<nrow; i++){
-        sendLeftBuffer[i] = current(i, 1);
-    }
-    MPI_Isend(sendLeftBuffer, nrow, MPI_INT, ranks[3], 0, comm, &requests[7]);
-    
+    MPI_Isend(sendL, nrow, MPI_INT, neighbors[3], 0, comm, &requests[7]);
 
     //Right
-    int * sendRightBuffer = (int *) malloc(sizeof(int) * nrow);
-    int * recvRightBuffer = (int *) malloc(sizeof(int) * nrow);
-    MPI_Irecv(recvRightBuffer, nrow, MPI_INT, ranks[4], 0, comm, &requests[8]);
-    //Add Kokkos parallel for 
-    for(int i=1; i<(nrow); i++){
-        current(i, nrow + 1) = recvRightBuffer[i];
-    }
-    //Add Kokkos parallel for 
-    for(int i=1; i<(nrow); i++){
-        sendRightBuffer[i] = current(i , nrow);
-    }
-    MPI_Isend(sendRightBuffer, nrow, MPI_INT, ranks[4], 0, comm, &requests[9]);
+    MPI_Irecv(recvR, nrow, MPI_INT, neighbors[4], 0, comm, &requests[8]);
+    MPI_Isend(sendR, nrow, MPI_INT, neighbors[4], 0, comm, &requests[9]);
 
     //Top Left
-    MPI_Irecv(viewData + (nrow + 1)*(ncol + 2), 1, MPI_INT, ranks[5], 0, comm, &requests[10]);
-    MPI_Isend(viewData + (nrow)*(ncol + 2) + 1, 1, MPI_INT, ranks[5], 0, comm, &requests[11]);
-    //Top
-    MPI_Irecv(viewData + (nrow + 1)*(ncol + 2) + 1, ncol, MPI_INT, ranks[6], 0, comm, &requests[12]);
-    MPI_Isend(viewData + (nrow)*(ncol + 2) + 1, ncol, MPI_INT, ranks[6], 0, comm, &requests[13]);
-    //Top Right
-    MPI_Irecv(viewData + (nrow + 2)*(ncol + 2) - 1, 1, MPI_INT, ranks[7], 0, comm, &requests[14]);
-    MPI_Isend(viewData + (nrow + 1)*(ncol + 2) - 2, 1, MPI_INT, ranks[7], 0, comm, &requests[15]);
+    MPI_Irecv(viewData + (nrow + 1)*(ncol + 2), 1, MPI_INT, neighbors[5], 0, comm, &requests[10]);
+    MPI_Isend(viewData + (nrow)*(ncol + 2) + 1, 1, MPI_INT, neighbors[5], 0, comm, &requests[11]);
 
-    MPI_Waitall(16, requests, MPI_STATUSES_IGNORE);
-    free(sendLeftBuffer);
-    free(sendRightBuffer);
-    free(recvLeftBuffer);
-    free(recvRightBuffer);
+    //Top
+    MPI_Irecv(viewData + (nrow + 1)*(ncol + 2) + 1, ncol, MPI_INT, neighbors[6], 0, comm, &requests[12]);
+    MPI_Isend(viewData + (nrow)*(ncol + 2) + 1,     ncol, MPI_INT, neighbors[6], 0, comm, &requests[13]);
+
+    //Top Right
+    MPI_Irecv(viewData + (nrow + 2)*(ncol + 2) - 1, 1, MPI_INT, neighbors[7], 0, comm, &requests[14]);
+    MPI_Isend(viewData + (nrow + 1)*(ncol + 2) - 2, 1, MPI_INT, neighbors[7], 0, comm, &requests[15]);
+
+    MPI_Waitall(NREQUESTS, requests, MPI_STATUSES_IGNORE);
+
+    //TODO Add Kokkos parallel for 
+    //unpack
+    for(int i=1; i<=nrow; i++){
+        current(i, 0)        = recvL[i-1];
+        current(i, nrow + 1) = recvR[i-1];
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -233,106 +194,149 @@ int main(int argc, char* argv[]) {
         }
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
-    Kokkos::initialize(argc, argv);
-    {
-    Kokkos::DefaultExecutionSpace::print_configuration(std::cout);
+    Kokkos::initialize(argc, argv); {
+        Kokkos::DefaultExecutionSpace::print_configuration(std::cout);
 
-    std::cout << argv[0] << std::endl;
+        std::cout << argv[0] << std::endl;
 
-  // N = dims for matrices
-    int N = atoi(argv[1]);
-    int iter = atoi(argv[2]);
+        // N = dimension of 2D game of life state
+        int N = atoi(argv[1]);
+        int iter = atoi(argv[2]);
 
-    if(N%nProc !=0){
-        std::cerr << "The processes don't divide N evenly" << std::endl;
-        MPI_Abort(MPI_COMM_WORLD, -1);
-    }
+        if(N%nProc !=0){
+            std::cerr << "The processes don't divide N evenly" << std::endl;
+            MPI_Abort(MPI_COMM_WORLD, -1);
+        }
 
-    int M = sqrt(nProc);
-    int dims[2] = {M, M};
-    int periodic[2] = {1,1};
-    MPI_Comm comm;
-    MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periodic, 0, &comm);
+        // get neighbor ranks
+        int M = sqrt(nProc);
+        int dims[MAXDIMS] = {M, M};
+        int periodic[MAXDIMS] = {1,1};
+        MPI_Comm comm;
+        MPI_Cart_create(MPI_COMM_WORLD, MAXDIMS, dims, periodic, 0, &comm);
+        int coords[MAXDIMS];
+        MPI_Cart_coords(comm, rank, MAXDIMS, coords);
+        int neighbors[NNEIGHBORS];
+        int counter = 0;
+        int tempR, tempC; 
+        for(int i=-1; i<2; i++){
+            for(int j=-1; j<2; j++){
+                if(!(i==0 && j==0)){
+                    tempR = coords[0] + i;
+                    tempC = coords[1] + j;
+                    if(tempR < 0){
+                        tempR = tempR + dims[0];
+                    }
+                    else{
+                        tempR = tempR % dims[0];
+                    }
+                    if(tempC < 0){
+                        tempC = tempC + dims[0];
+                    }
+                    else{
+                        tempC = tempC % dims[0];
+                    }
+                    int tempCoords[2] = {tempR, tempC};
+                    MPI_Cart_rank(comm, tempCoords, &(neighbors[counter]));
+                    if (rank == 0) {
+                        std::cout << neighbors[counter] << std::endl;
+                    }
+                    counter++;
+                }            
+            }
+        }
 
-    int localN = N/sqrt(nProc);
+        int localN = N/M;
 
-    //Device Views
-    Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> current("current", localN+2, localN+2);
-    Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> next("next", localN+2, localN+2);
+        //Device Views
+        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaUVMSpace> current("current", localN+2, localN+2);
+        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaUVMSpace> next("next", localN+2, localN+2);
 
-    //Host Views
-    Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> currentMirror("currentMirror", localN+2, localN+2);
+        //Host Views
+        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> currentMirror("currentMirror", localN+2, localN+2);
 
-    setActive(currentMirror, argc, argv);
-    Kokkos::deep_copy(current, currentMirror);
+        if (rank == 0) {
+            setActive(currentMirror, argc, argv);
+            Kokkos::deep_copy(current, currentMirror);
+        }
 
-    std::cout << "Passed!" << std::endl;
+        bool print = atoi(argv[argc - 1]);
+        if(print && rank == 0){
+            std::cout << "Current: " << std::endl;
+            printState(current.data(), localN+2);
+        }
 
-    bool print = atoi(argv[argc - 1]);
-    if(print){
-        std::cout << "Current: " << std::endl;
-        printState(current.data(), localN+2);
-    }
-    for(int i=0; i<iter; i++){
-        exchangeGhosts(comm, current, localN, localN);
-        Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({1,1}, {localN+1,localN+1}), 
-        KOKKOS_LAMBDA(const int row, const int col){
-            int neighbors = 0;
-            for(int i=-1; i<=1; i++){ //Calculate total neighbors
-                for(int j=-1; j<=1; j++){
-                    if(!(i == 0 && j == 0)){ //Avoid checking self
-                        int tempR, tempC;
-                        tempR = row + i;
-                        tempC = col + j;
-                        
-                        neighbors += current(tempR, tempC);
+        MPI_Request requests[2 * NNEIGHBORS];
+        // packing buffers
+        int* sendL = (int* ) malloc(localN * sizeof(int));
+        int* recvL = (int* ) malloc(localN * sizeof(int));
+        int* sendR = (int* ) malloc(localN * sizeof(int));
+        int* recvR = (int* ) malloc(localN * sizeof(int));
+        for(int i=0; i<iter; i++){
+            Kokkos::deep_copy(currentMirror, current);
+            exchangeGhosts(comm, currentMirror, localN, localN, neighbors, sendL, recvL, sendR, recvL, requests);
+            Kokkos::deep_copy(current, currentMirror);
+            
+            Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({1,1}, {localN+1,localN+1}), 
+            KOKKOS_LAMBDA(const int row, const int col){
+                int neighbors = 0;
+                for(int i=-1; i<=1; i++){ //Calculate total neighbors
+                    for(int j=-1; j<=1; j++){
+                        if(!(i == 0 && j == 0)){ //Avoid checking self
+                            int tempR, tempC;
+                            tempR = row + i;
+                            tempC = col + j;
+                            
+                            neighbors += current(tempR, tempC);
+                        }
                     }
                 }
-            }
-            if(current(row, col) == 1){ //If cell is alive
-                if(neighbors < 2){
-                    next(row, col) = 0; //Cell dies because of solitude
+                if(current(row, col) == 1){ //If cell is alive
+                    if(neighbors < 2){
+                        next(row, col) = 0; //Cell dies because of solitude
+                    }
+                    else if(neighbors < 4){
+                        next(row, col) = 1; //Cell survives
+                    }
+                    else if(neighbors >= 4){
+                        next(row, col) = 0; //Cell dies because of overpopulation
+                    }
+                } else {
+                    if(neighbors == 3){
+                        next(row, col) = 1;//Cell is born
+                    } else{
+                        next(row, col) = 0;//No cell is born
+                    }
                 }
-                else if(neighbors < 4){
-                    next(row, col) = 1; //Cell survives
-                }
-                else if(neighbors >= 4){
-                    next(row, col) = 0; //Cell dies because of overpopulation
-                }
-            }
-            else{
-                if(neighbors == 3){
-                    next(row, col) = 1;//Cell is born
-                }
-                else{
-                    next(row, col) = 0;//No cell is born
-                }
-            }
-        });
-        //Kokkos::deep_copy(current, next);
-        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> temp("tempView", localN+2, localN+2);
-        temp = current;
-        current = next;
-        next = temp;
+            });
 
-        //Write views to storage
-        if(print){
-            int rank;
-            MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-            std::string path = "../data/";
-            writeState(current.data(), i, path, rank, localN+2);
-        }
-    }
-    //Stitch and print
-    if(rank == 0){
-        if(print){
-            std::string path = "../data/";
-            stitchPrint(path);
-        }
-    }
+            Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaUVMSpace> temp("tempView", localN+2, localN+2);
+            temp = current;
+            current = next;
+            next = temp;
 
-  MPI_Comm_free(&comm);
-  }
-  Kokkos::finalize();
-  MPI_Finalize();
+            //Write views to storage
+            if(print){
+                int rank;
+                MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+                std::string path = "../data/";
+                writeState(current.data(), i, path, rank, localN+2);
+            }
+        }
+        //Stitch and print
+        if(rank == 0){
+            if(print){
+                std::string path = "../data/";
+                stitchPrint(path);
+            }
+        }
+
+        MPI_Comm_free(&comm);
+        free(sendL);
+        free(sendR);
+        free(recvL);
+        free(recvR);
+    }
+    Kokkos::finalize();
+    MPI_Finalize();
 }
