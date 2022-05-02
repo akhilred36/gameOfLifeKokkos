@@ -84,15 +84,15 @@ void setActive(Kokkos::View<int **, Kokkos::LayoutRight, Kokkos::HostSpace> view
     }
 }
 
-void printState(int *m, int N){
-    using namespace std;
-    for(int i=N-1; i>=0; i--){
-        for(int j=0; j<N; j++){
-            std::cout << m[N*i + j] << " ";
-        }
-        std::cout << "\n";
-    }
-}
+//void printState(int *m, int N){
+//    using namespace std;
+//    for(int j=0; j<N; j++){
+//        for(int i=N-1; i>=0; i--){
+//            std::cout << m[N*j + i] << " ";
+//        }
+//        std::cout << "\n";
+//    }
+//}
 
 void writeState(int *m, int iter, std::string path, int rank, int size){
     using namespace std;
@@ -118,15 +118,15 @@ void stitchPrint(std::string path){
     
 }
 
-// void printState(Kokkos::View<int **, Kokkos::CudaSpace> view, int size){
-//     for(int i=0; i<size; i++){
-//         for(int j=0; j<size; j++){
-//             std::cout << i << ", " << j << "\n";
-//             std::cout << view(i, j) << " ";
-//         }
-//         std::cout << "\n";
-//     }
-// }
+void printState(Kokkos::View<int **, Kokkos::LayoutRight, Kokkos::HostSpace> view, int N){
+    for(int row=0; row<N; row++){
+        for(int col=0; col<N; col++){
+            std::cout << view(row, col) << " ";
+        }
+        std::cout << "\n";
+    }
+}
+
 
 void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> current,
                         int nrow, int ncol, int* neighbors, int* sendL, int* recvL, int* sendR, int* recvR,
@@ -135,16 +135,16 @@ void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokk
     int * viewData;
     viewData = current.data();
     //Bottom Left
-    MPI_Irecv(viewData,            1, MPI_INT, neighbors[0], 0, comm, &requests[0]);
-    MPI_Isend(viewData + ncol + 3, 1, MPI_INT, neighbors[0], 0, comm, &requests[1]);
+    MPI_Irecv(&current(0, 0), 1, MPI_INT, neighbors[0], 0, comm, &requests[0]);
+    MPI_Isend(&current(1, 1), 1, MPI_INT, neighbors[0], 0, comm, &requests[1]);
 
     //Bottom
-    MPI_Irecv(viewData + 1,        ncol, MPI_INT, neighbors[1], 0, comm, &requests[2]);
-    MPI_Isend(viewData + ncol + 3, ncol, MPI_INT, neighbors[1], 0, comm, &requests[3]);
+    MPI_Irecv(&current(1, 0), ncol, MPI_INT, neighbors[1], 0, comm, &requests[2]);
+    MPI_Isend(&current(1, 1), ncol, MPI_INT, neighbors[1], 0, comm, &requests[3]);
 
     //Bottom Right
-    MPI_Irecv(viewData + ncol + 1,         1, MPI_INT, neighbors[2], 0, comm, &requests[4]);
-    MPI_Isend(viewData + 2*(ncol + 2) - 2, 1, MPI_INT, neighbors[2], 0, comm, &requests[5]);
+    MPI_Irecv(&current(ncol + 1, 0), 1, MPI_INT, neighbors[2], 0, comm, &requests[4]);
+    MPI_Isend(&current(ncol, 1), 1, MPI_INT, neighbors[2], 0, comm, &requests[5]);
 
     //Left
     MPI_Irecv(recvL, nrow, MPI_INT, neighbors[3], 0, comm, &requests[6]);
@@ -161,12 +161,12 @@ void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokk
     MPI_Isend(sendR, nrow, MPI_INT, neighbors[4], 0, comm, &requests[9]);
 
     //Top Left
-    MPI_Irecv(viewData + (nrow + 1)*(ncol + 2), 1, MPI_INT, neighbors[5], 0, comm, &requests[10]);
-    MPI_Isend(viewData + (nrow)*(ncol + 2) + 1, 1, MPI_INT, neighbors[5], 0, comm, &requests[11]);
+    MPI_Irecv(&current(0, nrow + 1), 1, MPI_INT, neighbors[5], 0, comm, &requests[10]);
+    MPI_Isend(&current(1, nrow),     1, MPI_INT, neighbors[5], 0, comm, &requests[11]);
 
     //Top
-    MPI_Irecv(viewData + (nrow + 1)*(ncol + 2) + 1, ncol, MPI_INT, neighbors[6], 0, comm, &requests[12]);
-    MPI_Isend(viewData + (nrow)*(ncol + 2) + 1,     ncol, MPI_INT, neighbors[6], 0, comm, &requests[13]);
+    MPI_Irecv(&current(1, nrow + 1), ncol, MPI_INT, neighbors[6], 0, comm, &requests[12]);
+    MPI_Isend(&current(1, nrow), ncol, MPI_INT, neighbors[6], 0, comm, &requests[13]);
 
     // cout << "Top Buffer: " << endl;
     // for(int i=0; i<ncol; i++){
@@ -174,8 +174,8 @@ void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokk
     // }
 
     //Top Right
-    MPI_Irecv(viewData + (nrow + 2)*(ncol + 2) - 1, 1, MPI_INT, neighbors[7], 0, comm, &requests[14]);
-    MPI_Isend(viewData + (nrow + 1)*(ncol + 2) - 2, 1, MPI_INT, neighbors[7], 0, comm, &requests[15]);
+    MPI_Irecv(&current(ncol + 1, nrow + 1), 1, MPI_INT, neighbors[7], 0, comm, &requests[14]);
+    MPI_Isend(&current(ncol, nrow), 1, MPI_INT, neighbors[7], 0, comm, &requests[15]);
 
     MPI_Waitall(NREQUESTS, requests, MPI_STATUSES_IGNORE);
 
@@ -263,15 +263,16 @@ int main(int argc, char* argv[]) {
         if (rank == 0) {
             setActive(currentMirror, argc, argv);
             int * p = &currentMirror(1, 1);
-            std::cout << "Current at 1: " << *p << std::endl;
-            std::cout << "Current at 2: " << *(p+1) << std::endl;
+            std::cout << "Current at 1, 1: " << *p << std::endl;
+            std::cout << "Current at 2, 1: " << *(p+1) << std::endl;
+            std::cout << "Current at 1, 2: " << *(10*(localN+2)+p+10) << std::endl;
             Kokkos::deep_copy(current, currentMirror);
         }
 
         bool print = atoi(argv[argc - 1]);
         if(print && rank == 0){
             std::cout << "Current: " << std::endl;
-            printState(current.data(), localN+2);
+            printState(currentMirror, localN+2);
         }
 
         MPI_Request requests[2 * NNEIGHBORS];
