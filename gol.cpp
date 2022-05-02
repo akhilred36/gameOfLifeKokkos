@@ -168,6 +168,11 @@ void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokk
     MPI_Irecv(viewData + (nrow + 1)*(ncol + 2) + 1, ncol, MPI_INT, neighbors[6], 0, comm, &requests[12]);
     MPI_Isend(viewData + (nrow)*(ncol + 2) + 1,     ncol, MPI_INT, neighbors[6], 0, comm, &requests[13]);
 
+    // cout << "Top Buffer: " << endl;
+    // for(int i=0; i<ncol; i++){
+    //     cout << viewData[0] + 
+    // }
+
     //Top Right
     MPI_Irecv(viewData + (nrow + 2)*(ncol + 2) - 1, 1, MPI_INT, neighbors[7], 0, comm, &requests[14]);
     MPI_Isend(viewData + (nrow + 1)*(ncol + 2) - 2, 1, MPI_INT, neighbors[7], 0, comm, &requests[15]);
@@ -257,6 +262,9 @@ int main(int argc, char* argv[]) {
 
         if (rank == 0) {
             setActive(currentMirror, argc, argv);
+            int * p = &currentMirror(1, 1);
+            std::cout << "Current at 1: " << *p << std::endl;
+            std::cout << "Current at 2: " << *(p+1) << std::endl;
             Kokkos::deep_copy(current, currentMirror);
         }
 
