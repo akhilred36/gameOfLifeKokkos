@@ -132,58 +132,64 @@ void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokk
                         int nrow, int ncol, int* neighbors, int* sendL, int* recvL, int* sendR, int* recvR,
                         MPI_Request *requests) {
     //Starts at bottom left, goes right, then moves up and goes right...
-    int * viewData;
-    viewData = current.data();
-    //Bottom Left
-    MPI_Irecv(&current(0, 0), 1, MPI_INT, neighbors[0], 0, comm, &requests[0]);
-    MPI_Isend(&current(1, 1), 1, MPI_INT, neighbors[0], 0, comm, &requests[1]);
+    //Top Left to Bottom Right
+    MPI_Irecv(&(current(nrow + 1, ncol + 1)), 1, MPI_INT, neighbors[0], 0, comm, &(requests[0]));
+    MPI_Isend(&(current(1, 1)), 1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
+    // int temp = 5;
+    // MPI_Isend(&temp, 1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
 
-    //Bottom
-    MPI_Irecv(&current(1, 0), ncol, MPI_INT, neighbors[1], 0, comm, &requests[2]);
-    MPI_Isend(&current(1, 1), ncol, MPI_INT, neighbors[1], 0, comm, &requests[3]);
+    // Top to Bottom
+    MPI_Irecv(&(current(nrow + 1, 1)), nrow, MPI_INT, neighbors[1], 0, comm, &(requests[2]));
+    MPI_Isend(&(current(1, 1)), nrow, MPI_INT, neighbors[1], 0, comm, &(requests[3]));
 
-    //Bottom Right
-    MPI_Irecv(&current(ncol + 1, 0), 1, MPI_INT, neighbors[2], 0, comm, &requests[4]);
-    MPI_Isend(&current(ncol, 1), 1, MPI_INT, neighbors[2], 0, comm, &requests[5]);
+    //Top Right to Bottom left
+    MPI_Irecv(&(current(nrow + 1, 0)), 1, MPI_INT, neighbors[2], 0, comm, &(requests[4]));
+    MPI_Isend(&(current(1, ncol)), 1, MPI_INT, neighbors[2], 0, comm, &(requests[5]));
+    // int temp1 = 4;
+    // MPI_Isend(&temp1, 1, MPI_INT, neighbors[2], 0, comm, &(requests[5]));
 
-    //Left
-    MPI_Irecv(recvL, nrow, MPI_INT, neighbors[3], 0, comm, &requests[6]);
+    //Right to Left
+    MPI_Irecv(recvL, nrow, MPI_INT, neighbors[3], 0, comm, &(requests[6]));
     //TODO Add Kokkos parallel for 
     //pack left and right edges
     for(int i=1; i<=nrow; i++){
-        sendL[i-1] = current(1, i);
-        sendR[i-1] = current(nrow, i);
+        sendL[i-1] = current(i, 1);
+        sendR[i-1] = current(i, ncol);
     }
-    MPI_Isend(sendL, nrow, MPI_INT, neighbors[3], 0, comm, &requests[7]);
+    MPI_Isend(sendR, nrow, MPI_INT, neighbors[3], 0, comm, &(requests[7]));
 
-    //Right
-    MPI_Irecv(recvR, nrow, MPI_INT, neighbors[4], 0, comm, &requests[8]);
-    MPI_Isend(sendR, nrow, MPI_INT, neighbors[4], 0, comm, &requests[9]);
+    //Left to Right
+    MPI_Irecv(recvR, nrow, MPI_INT, neighbors[4], 0, comm, &(requests[8]));
+    MPI_Isend(sendL, nrow, MPI_INT, neighbors[4], 0, comm, &(requests[9]));
 
-    //Top Left
-    MPI_Irecv(&current(0, nrow + 1), 1, MPI_INT, neighbors[5], 0, comm, &requests[10]);
-    MPI_Isend(&current(1, nrow),     1, MPI_INT, neighbors[5], 0, comm, &requests[11]);
+    //Bottom Left to Top Right
+    MPI_Irecv(&(current(0, ncol + 1)), 1, MPI_INT, neighbors[5], 0, comm, &(requests[10]));
+    MPI_Isend(&(current(nrow, 1)),     1, MPI_INT, neighbors[5], 0, comm, &(requests[11]));
+    // int temp2 = 3;
+    // MPI_Isend(&temp2,     1, MPI_INT, neighbors[5], 0, comm, &(requests[11]));
 
-    //Top
-    MPI_Irecv(&current(1, nrow + 1), ncol, MPI_INT, neighbors[6], 0, comm, &requests[12]);
-    MPI_Isend(&current(1, nrow), ncol, MPI_INT, neighbors[6], 0, comm, &requests[13]);
+    //Bottom to Top
+    MPI_Irecv(&(current(0, 1)), ncol, MPI_INT, neighbors[6], 0, comm, &(requests[12]));
+    MPI_Isend(&(current(nrow, 1)), ncol, MPI_INT, neighbors[6], 0, comm, &(requests[13]));
 
     // cout << "Top Buffer: " << endl;
     // for(int i=0; i<ncol; i++){
     //     cout << viewData[0] + 
     // }
 
-    //Top Right
-    MPI_Irecv(&current(ncol + 1, nrow + 1), 1, MPI_INT, neighbors[7], 0, comm, &requests[14]);
-    MPI_Isend(&current(ncol, nrow), 1, MPI_INT, neighbors[7], 0, comm, &requests[15]);
+    //Bottom Right to Top Left
+    MPI_Irecv(&(current(0, 0)), 1, MPI_INT, neighbors[7], 0, comm, &(requests[14]));
+    MPI_Isend(&(current(nrow, ncol)), 1, MPI_INT, neighbors[7], 0, comm, &(requests[15]));
+    // int temp3 = 2;
+    // MPI_Isend(&temp3, 1, MPI_INT, neighbors[7], 0, comm, &(requests[15]));
 
     MPI_Waitall(NREQUESTS, requests, MPI_STATUSES_IGNORE);
 
     //TODO Add Kokkos parallel for 
-    //unpack
+    //unpack Right to Left
     for(int i=1; i<=nrow; i++){
-        current(0, i)        = recvL[i-1]; // Left
-        current(nrow + 1, i) = recvR[i-1]; // Right 
+        current(i, 0)        = recvL[i-1]; // Left
+        current(i, nrow + 1) = recvR[i-1]; // Right 
     }
 }
 
@@ -243,9 +249,9 @@ int main(int argc, char* argv[]) {
                     }
                     int tempCoords[2] = {tempR, tempC};
                     MPI_Cart_rank(comm, tempCoords, &(neighbors[counter]));
-                    if (rank == 0) {
-                        std::cout << neighbors[counter] << std::endl;
-                    }
+                    // if (rank == 0) {
+                    //     std::cout << neighbors[counter] << std::endl;
+                    // }
                     counter++;
                 }            
             }
@@ -260,30 +266,39 @@ int main(int argc, char* argv[]) {
         //Host Views
         Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> currentMirror("currentMirror", localN+2, localN+2);
 
-        if (rank == 0) {
-            setActive(currentMirror, argc, argv);
-            int * p = &currentMirror(1, 1);
-            std::cout << "Current at 1, 1: " << *p << std::endl;
-            std::cout << "Current at 2, 1: " << *(p+1) << std::endl;
-            std::cout << "Current at 1, 2: " << *(10*(localN+2)+p+10) << std::endl;
-            Kokkos::deep_copy(current, currentMirror);
-        }
-
-        bool print = atoi(argv[argc - 1]);
-        if(print && rank == 0){
-            std::cout << "Current: " << std::endl;
-            printState(currentMirror, localN+2);
-        }
-
         MPI_Request requests[2 * NNEIGHBORS];
         // packing buffers
         int* sendL = (int* ) malloc(localN * sizeof(int));
         int* recvL = (int* ) malloc(localN * sizeof(int));
         int* sendR = (int* ) malloc(localN * sizeof(int));
         int* recvR = (int* ) malloc(localN * sizeof(int));
+        
+        if (rank == 0) {
+            setActive(currentMirror, argc, argv);
+            int * p = &currentMirror(1, 1);
+            // std::cout << "Current at 1, 1: " << *p << std::endl;
+            // std::cout << "Current at 2, 1: " << *(p+1) << std::endl;
+            // std::cout << "Current at 1, 2: " << *(10*(localN+2)+p+10) << std::endl;
+            Kokkos::deep_copy(current, currentMirror);
+        }
+        
+        bool print = atoi(argv[argc - 1]);
+        if(print && rank == 0){
+            std::cout << "Current: " << std::endl;
+            printState(currentMirror, localN+2);
+        }
+
+        exchangeGhosts(comm, currentMirror, localN, localN, neighbors, sendL, recvL, sendR, recvR, requests);
+
+        if(print && rank == 0){
+            std::cout << "Current: " << std::endl;
+            printState(currentMirror, localN+2);
+        }
+
+
         for(int i=0; i<iter; i++){
             Kokkos::deep_copy(currentMirror, current);
-            exchangeGhosts(comm, currentMirror, localN, localN, neighbors, sendL, recvL, sendR, recvL, requests);
+            exchangeGhosts(comm, currentMirror, localN, localN, neighbors, sendL, recvL, sendR, recvR, requests);
             Kokkos::deep_copy(current, currentMirror);
             
             Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({1,1}, {localN+1,localN+1}), 
