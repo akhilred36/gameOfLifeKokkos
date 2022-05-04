@@ -51,7 +51,7 @@ mpirun -n 4 ./gol 32 100 10 10 10 11 10 13 0
 ```
 
 ## Interpreting logs:
-The logs are written into the directory data/. The naming convention used is <rank>_<iter>. For example, to view the state of a mesh of rank 0 and iteration 12, run:
+The logs are written into the directory data/. The naming convention used is ```<rank>_<iter>```. For example, to view the state of a mesh of rank 0 and iteration 12, run:
   ```bash
   cat 0_12
   ```
