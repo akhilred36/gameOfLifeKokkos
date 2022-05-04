@@ -297,10 +297,6 @@ int main(int argc, char* argv[]) {
 
 
         for(int i=0; i<iter; i++){
-            Kokkos::deep_copy(currentMirror, current);
-            exchangeGhosts(comm, currentMirror, localN, localN, neighbors, sendL, recvL, sendR, recvR, requests);
-            Kokkos::deep_copy(current, currentMirror);
-            
             Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({1,1}, {localN+1,localN+1}), 
             KOKKOS_LAMBDA(const int row, const int col){
                 int neighbors = 0;
@@ -340,6 +336,9 @@ int main(int argc, char* argv[]) {
             next = temp;
 
             //Write views to storage
+            Kokkos::deep_copy(currentMirror, current);
+            exchangeGhosts(comm, currentMirror, localN, localN, neighbors, sendL, recvL, sendR, recvR, requests);
+            Kokkos::deep_copy(current, currentMirror);
             if(print){
                 int rank;
                 MPI_Comm_rank(MPI_COMM_WORLD, &rank);
