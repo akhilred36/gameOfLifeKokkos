@@ -1,5 +1,5 @@
 all: clean
-	cmake -S . -B build/ -DCMAKE_CXX_COMPILER="nvcc_wrapper" -DCMAKE_CXX_FLAGS="--expt-extended-lambda -g -DDEBUG" -DKokkos_ENABLE_CUDA=On
+	cmake -S . -B build/ -DCMAKE_CXX_COMPILER="nvcc_wrapper" -DCMAKE_CXX_FLAGS="--expt-extended-lambda -g -DDEBUG" -DKokkos_ENABLE_CUDA=On -DMPI_CXX_COMPILER="mpicc"
 	cd build && make
 
 #glider:
