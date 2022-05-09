@@ -119,6 +119,7 @@ void stitchPrint(std::string path){
 }
 
 void printState(Kokkos::View<int **, Kokkos::LayoutRight, Kokkos::HostSpace> view, int N){
+    std::cout <<"N is: " << N << std::endl;
     for(int row=0; row<N; row++){
         for(int col=0; col<N; col++){
             std::cout << view(row, col) << " ";
@@ -197,6 +198,7 @@ int main(int argc, char* argv[]) {
     MPI_Init(&argc, &argv);
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    std::cout << "Rank is: " << rank << std::endl;
     int nProc;
     MPI_Comm_size(MPI_COMM_WORLD, &nProc);
     if(!(sqrt(nProc) * sqrt(nProc) == nProc)){
@@ -260,8 +262,8 @@ int main(int argc, char* argv[]) {
         int localN = N/M;
 
         //Device Views
-        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaUVMSpace> current("current", localN+2, localN+2);
-        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaUVMSpace> next("next", localN+2, localN+2);
+        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaSpace> current("current", localN+2, localN+2);
+        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaSpace> next("next", localN+2, localN+2);
 
         //Host Views
         Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> currentMirror("currentMirror", localN+2, localN+2);
@@ -273,6 +275,8 @@ int main(int argc, char* argv[]) {
         int* sendR = (int* ) malloc(localN * sizeof(int));
         int* recvR = (int* ) malloc(localN * sizeof(int));
         
+        // std::cout << "Rank is: " << rank << std::endl;
+
         if (rank == 0) {
             setActive(currentMirror, argc, argv);
             int * p = &currentMirror(1, 1);
@@ -288,15 +292,18 @@ int main(int argc, char* argv[]) {
             printState(currentMirror, localN+2);
         }
 
-        exchangeGhosts(comm, currentMirror, localN, localN, neighbors, sendL, recvL, sendR, recvR, requests);
+        // exchangeGhosts(comm, currentMirror, localN, localN, neighbors, sendL, recvL, sendR, recvR, requests);
 
-        if(print && rank == 0){
-            std::cout << "Current: " << std::endl;
-            printState(currentMirror, localN+2);
-        }
+        // if(print && rank == 0){
+        //     std::cout << "Current: " << std::endl;
+        //     printState(currentMirror, localN+2);
+        // }
 
 
         for(int i=0; i<iter; i++){
+            Kokkos::deep_copy(currentMirror, current);
+            exchangeGhosts(comm, currentMirror, localN, localN, neighbors, sendL, recvL, sendR, recvR, requests);
+            Kokkos::deep_copy(current, currentMirror);
             Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({1,1}, {localN+1,localN+1}), 
             KOKKOS_LAMBDA(const int row, const int col){
                 int neighbors = 0;
@@ -330,21 +337,17 @@ int main(int argc, char* argv[]) {
                 }
             });
 
-            Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaUVMSpace> temp("tempView", localN+2, localN+2);
-            temp = current;
-            current = next;
-            next = temp;
-
-            //Write views to storage
-            Kokkos::deep_copy(currentMirror, current);
-            exchangeGhosts(comm, currentMirror, localN, localN, neighbors, sendL, recvL, sendR, recvR, requests);
-            Kokkos::deep_copy(current, currentMirror);
             if(print){
                 int rank;
                 MPI_Comm_rank(MPI_COMM_WORLD, &rank);
                 std::string path = "../data/";
-                writeState(current.data(), i, path, rank, localN+2);
+                writeState(currentMirror.data(), i, path, rank, localN+2);
             }
+
+            Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaSpace> temp("tempView", localN+2, localN+2);
+            temp = current;
+            current = next;
+            next = temp;
         }
         //Stitch and print
         if(rank == 0){

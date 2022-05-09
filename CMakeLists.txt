@@ -19,7 +19,7 @@ include_directories(${MPI_INCLUDE_PATH})
 add_executable(gol gol.cpp)
 
 set_target_properties(gol PROPERTIES CUDA_ARCHITECTURES "35")
-set(CMAKE_CUDA_FLAGS "-ccbin=mpicxx -arch=sm_35")
+set(CMAKE_CUDA_FLAGS "-ccbin=mpicc -arch=sm_35")
 
 # This is the only thing required to set up compiler/linker flags
 target_link_libraries(gol Kokkos::kokkos ${MPI_LIBRARIES})
