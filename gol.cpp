@@ -194,6 +194,90 @@ void exchangeGhosts(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokk
     }
 }
 
+void exchangeGhostsGPU(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaSpace> current,
+                        int nrow, int ncol, int* neighbors,
+                        Kokkos::View<int*, Kokkos::CudaSpace> sendL,
+                        Kokkos::View<int*, Kokkos::CudaSpace> recvL, 
+                        Kokkos::View<int*, Kokkos::CudaSpace> sendR, 
+                        Kokkos::View<int*, Kokkos::CudaSpace> recvR,
+                        MPI_Request *requests) {
+    //Starts at bottom left, goes right, then moves up and goes right...
+    //Top Left to Bottom Right
+    // MPI_Irecv(&(current(nrow + 1, ncol + 1)), 1, MPI_INT, neighbors[0], 0, comm, &(requests[0]));
+    // MPI_Isend(&(current(1, 1)), 1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
+    MPI_Isend(&(current.data()[nrow*1 + 1]), 1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
+    // int temp = 5;
+    // MPI_Isend(&temp, 1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
+
+    // Top to Bottom
+    MPI_Irecv(&(current(nrow + 1, 1)), nrow, MPI_INT, neighbors[1], 0, comm, &(requests[2]));
+    MPI_Isend(&(current(1, 1)), nrow, MPI_INT, neighbors[1], 0, comm, &(requests[3]));
+
+    //Top Right to Bottom left
+    MPI_Irecv(&(current(nrow + 1, 0)), 1, MPI_INT, neighbors[2], 0, comm, &(requests[4]));
+    MPI_Isend(&(current(1, ncol)), 1, MPI_INT, neighbors[2], 0, comm, &(requests[5]));
+    // int temp1 = 4;
+    // MPI_Isend(&temp1, 1, MPI_INT, neighbors[2], 0, comm, &(requests[5]));
+
+    //Right to Left
+    MPI_Irecv(&(recvL(0)), nrow, MPI_INT, neighbors[3], 0, comm, &(requests[6]));
+    //TODO Add Kokkos parallel for 
+    //pack left and right edges
+    // for(int i=1; i<=nrow; i++){
+    //     sendL(i-1) = current(i, 1);
+    //     sendR(i-1) = current(i, ncol);
+    // }
+    Kokkos::parallel_for("packing", ((unsigned int) nrow) + 1, 
+        KOKKOS_LAMBDA(const int i){
+            sendL(i) = current(i+1, 1);
+            sendR(i) = current(i+1, ncol);
+        }
+    );
+    MPI_Isend(&(sendR(0)), nrow, MPI_INT, neighbors[3], 0, comm, &(requests[7]));
+
+    //Left to Right
+    MPI_Irecv(&(recvR(0)), nrow, MPI_INT, neighbors[4], 0, comm, &(requests[8]));
+    MPI_Isend(&(sendL(0)), nrow, MPI_INT, neighbors[4], 0, comm, &(requests[9]));
+
+    //Bottom Left to Top Right
+    MPI_Irecv(&(current(0, ncol + 1)), 1, MPI_INT, neighbors[5], 0, comm, &(requests[10]));
+    MPI_Isend(&(current(nrow, 1)),     1, MPI_INT, neighbors[5], 0, comm, &(requests[11]));
+    // int temp2 = 3;
+    // MPI_Isend(&temp2,     1, MPI_INT, neighbors[5], 0, comm, &(requests[11]));
+
+    //Bottom to Top
+    MPI_Irecv(&(current(0, 1)), ncol, MPI_INT, neighbors[6], 0, comm, &(requests[12]));
+    MPI_Isend(&(current(nrow, 1)), ncol, MPI_INT, neighbors[6], 0, comm, &(requests[13]));
+
+    // cout << "Top Buffer: " << endl;
+    // for(int i=0; i<ncol; i++){
+    //     cout << viewData[0] + 
+    // }
+
+    //Bottom Right to Top Left
+    MPI_Irecv(&(current(0, 0)), 1, MPI_INT, neighbors[7], 0, comm, &(requests[14]));
+    MPI_Isend(&(current(nrow, ncol)), 1, MPI_INT, neighbors[7], 0, comm, &(requests[15]));
+    // int temp3 = 2;
+    // MPI_Isend(&temp3, 1, MPI_INT, neighbors[7], 0, comm, &(requests[15]));
+
+    MPI_Waitall(NREQUESTS, requests, MPI_STATUSES_IGNORE);
+
+    //TODO Add Kokkos parallel for 
+    //unpack Right to Left
+    // for(int i=1; i<=nrow; i++){
+    //     current(i, 0)        = recvL(i-1); // Left
+    //     current(i, nrow + 1) = recvR(i-1); // Right 
+    // }
+
+    Kokkos::RangePolicy<Kokkos::CudaSpace> tempPolicy = Kokkos::RangePolicy<Kokkos::CudaSpace>(1, ((unsigned int) nrow) + 1);
+    Kokkos::parallel_for("unpacking", ((unsigned int) nrow) + 1, 
+        KOKKOS_LAMBDA(const int i){
+            current(i+1, 0)        = recvL(i); // Left
+            current(i+1, nrow + 1) = recvR(i); // Right 
+        }
+    );
+}
+
 int main(int argc, char* argv[]) {
     MPI_Init(&argc, &argv);
     int rank;
@@ -270,10 +354,16 @@ int main(int argc, char* argv[]) {
 
         MPI_Request requests[2 * NNEIGHBORS];
         // packing buffers
-        int* sendL = (int* ) malloc(localN * sizeof(int));
-        int* recvL = (int* ) malloc(localN * sizeof(int));
-        int* sendR = (int* ) malloc(localN * sizeof(int));
-        int* recvR = (int* ) malloc(localN * sizeof(int));
+        // int* sendL = (int* ) malloc(localN * sizeof(int));
+        // int* recvL = (int* ) malloc(localN * sizeof(int));
+        // int* sendR = (int* ) malloc(localN * sizeof(int));
+        // int* recvR = (int* ) malloc(localN * sizeof(int));
+
+        //packing views
+        Kokkos::View<int*, Kokkos::CudaSpace> sendLView("sendL", localN);
+        Kokkos::View<int*, Kokkos::CudaSpace> recvLView("recvL", localN);
+        Kokkos::View<int*, Kokkos::CudaSpace> sendRView("sendR", localN);
+        Kokkos::View<int*, Kokkos::CudaSpace> recvRView("recvR", localN);
         
         // std::cout << "Rank is: " << rank << std::endl;
 
@@ -301,9 +391,9 @@ int main(int argc, char* argv[]) {
 
 
         for(int i=0; i<iter; i++){
-            Kokkos::deep_copy(currentMirror, current);
-            exchangeGhosts(comm, currentMirror, localN, localN, neighbors, sendL, recvL, sendR, recvR, requests);
-            Kokkos::deep_copy(current, currentMirror);
+            // Kokkos::deep_copy(currentMirror, current);
+            exchangeGhostsGPU(comm, current, localN, localN, neighbors, sendLView, recvLView, sendRView, recvRView, requests);
+            // Kokkos::deep_copy(current, currentMirror);
             Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({1,1}, {localN+1,localN+1}), 
             KOKKOS_LAMBDA(const int row, const int col){
                 int neighbors = 0;
@@ -338,6 +428,7 @@ int main(int argc, char* argv[]) {
             });
 
             if(print){
+                Kokkos::deep_copy(currentMirror, current);
                 int rank;
                 MPI_Comm_rank(MPI_COMM_WORLD, &rank);
                 std::string path = "../data/";
@@ -358,10 +449,10 @@ int main(int argc, char* argv[]) {
         }
 
         MPI_Comm_free(&comm);
-        free(sendL);
-        free(sendR);
-        free(recvL);
-        free(recvR);
+        // free(sendL);
+        // free(sendR);
+        // free(recvL);
+        // free(recvR);
     }
     Kokkos::finalize();
     MPI_Finalize();
