@@ -9,7 +9,6 @@ Game of Life implementation in Kokkos with MPI.
 - CMake>=3.10
 
 ## Install prerequisites into a spack environment:
-Note: GCC@10.2.0 is required for the spack environment installation
 ```bash
 spack env create <name> spack.yaml
 ```
