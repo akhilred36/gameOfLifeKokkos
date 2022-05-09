@@ -262,8 +262,8 @@ int main(int argc, char* argv[]) {
         int localN = N/M;
 
         //Device Views
-        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaUVMSpace> current("current", localN+2, localN+2);
-        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaUVMSpace> next("next", localN+2, localN+2);
+        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaSpace> current("current", localN+2, localN+2);
+        Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaSpace> next("next", localN+2, localN+2);
 
         //Host Views
         Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::HostSpace> currentMirror("currentMirror", localN+2, localN+2);
@@ -344,7 +344,7 @@ int main(int argc, char* argv[]) {
                 writeState(currentMirror.data(), i, path, rank, localN+2);
             }
 
-            Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaUVMSpace> temp("tempView", localN+2, localN+2);
+            Kokkos::View<int**, Kokkos::LayoutRight, Kokkos::CudaSpace> temp("tempView", localN+2, localN+2);
             temp = current;
             current = next;
             next = temp;
