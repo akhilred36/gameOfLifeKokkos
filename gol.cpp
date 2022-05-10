@@ -205,12 +205,13 @@ void exchangeGhostsGPU(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, K
     //Top Left to Bottom Right
     // MPI_Irecv(&(current(nrow + 1, ncol + 1)), 1, MPI_INT, neighbors[0], 0, comm, &(requests[0]));
     // MPI_Isend(&(current(1, 1)), 1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
-    MPI_Isend(&(current.data()[nrow*1 + 1]), 1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
+    MPI_Irecv(&(current.data()[(nrow + 1)*(ncol + 2) + ncol + 1]), 1, MPI_INT, neighbors[0], 0, comm, &(requests[0]));
+    MPI_Isend(&(current.data()[(ncol + 2) + 1]),                   1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
     // int temp = 5;
     // MPI_Isend(&temp, 1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
 
     // Top to Bottom
-    MPI_Irecv(&(current(nrow + 1, 1)), nrow, MPI_INT, neighbors[1], 0, comm, &(requests[2]));
+    MPI_Irecv(&(current.data()(nrow + 1, 1)), nrow, MPI_INT, neighbors[1], 0, comm, &(requests[2]));
     MPI_Isend(&(current(1, 1)), nrow, MPI_INT, neighbors[1], 0, comm, &(requests[3]));
 
     //Top Right to Bottom left
