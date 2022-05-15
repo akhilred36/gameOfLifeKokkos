@@ -355,6 +355,7 @@ int main(int argc, char* argv[]) {
         free(recvL);
         free(recvR);
     }
+    // Finalize
     Kokkos::finalize();
     MPI_Finalize();
 }
