@@ -257,6 +257,7 @@ void exchangeGhostsGPU(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, K
     //Kokkos::RangePolicy<Kokkos::CudaSpace> tempPolicy = Kokkos::RangePolicy<Kokkos::CudaSpace>(1, ((unsigned int) nrow) + 1);
     Kokkos::parallel_for("unpacking top/bottom", ((unsigned int) ncol) + 3, 
         KOKKOS_LAMBDA(const int i){
+            // TODO flip?
             current(0, i)        = recvB(i); // Top
             current(nrow + 1, i) = recvT(i); // Bottom
         }
@@ -264,6 +265,7 @@ void exchangeGhostsGPU(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, K
     // unpack l/r buffers
     Kokkos::parallel_for("unpacking L/R", ((unsigned int) nrow) + 1, 
         KOKKOS_LAMBDA(const int i){
+            // TODO flip?
             current(i + 1, 0)        = recvR(i); // Left
             current(i + 1, ncol + 1) = recvL(i); // Right 
         }
@@ -327,9 +329,10 @@ int main(int argc, char* argv[]) {
                     }
                     int tempCoords[2] = {tempR, tempC};
                     MPI_Cart_rank(comm, tempCoords, &(neighbors[counter]));
-                    // if (rank == 0) {
-                    //     std::cout << neighbors[counter] << std::endl;
-                    // }
+                    // TODO: fix 
+                    if (rank == 0) {
+                        std::cout << "n: " << counter << ", coords: " << tempCoords[0] << ", " << tempCoords[1] << std::endl;
+                    }
                     counter++;
                 }            
             }
