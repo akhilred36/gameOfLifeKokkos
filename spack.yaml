@@ -4,6 +4,6 @@
 # configuration settings.
 spack:
   # add package specs to the `specs` list
-  specs: [cuda%gcc@10.2.0, valgrind, openmpi+cuda, kokkos@3.5.00+cuda+cuda_lambda+wrapper,
-    kokkos@3.5.00+cuda+cuda_lambda+wrapper cuda_arch=35, gcc@10.2.0]
+  specs: [gcc@10.2.0, cuda%gcc@10.2.0, kokkos@3.5.00%gcc@10.2.0+cuda+cuda_lambda+wrapper
+      cuda_arch=35, openmpi@4.0.7%gcc@10.2.0+cuda, mpip@3.5%gcc@10.2.0]
   view: true

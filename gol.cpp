@@ -200,81 +200,72 @@ void exchangeGhostsGPU(MPI_Comm comm, Kokkos::View<int**, Kokkos::LayoutRight, K
                         Kokkos::View<int*, Kokkos::CudaSpace> recvL, 
                         Kokkos::View<int*, Kokkos::CudaSpace> sendR, 
                         Kokkos::View<int*, Kokkos::CudaSpace> recvR,
+                        Kokkos::View<int*, Kokkos::CudaSpace> sendT,
+                        Kokkos::View<int*, Kokkos::CudaSpace> recvT, 
+                        Kokkos::View<int*, Kokkos::CudaSpace> sendB, 
+                        Kokkos::View<int*, Kokkos::CudaSpace> recvB,
                         MPI_Request *requests) {
-    //Starts at bottom left, goes right, then moves up and goes right...
-    //Top Left to Bottom Right
-    // MPI_Irecv(&(current(nrow + 1, ncol + 1)), 1, MPI_INT, neighbors[0], 0, comm, &(requests[0]));
-    // MPI_Isend(&(current(1, 1)), 1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
-    MPI_Irecv(&(current.data()[(nrow + 1)*(ncol + 2) + ncol + 1]), 1, MPI_INT, neighbors[0], 0, comm, &(requests[0]));
-    MPI_Isend(&(current.data()[(ncol + 2) + 1]),                   1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
-    // int temp = 5;
-    // MPI_Isend(&temp, 1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
-
-    // Top to Bottom
-    MPI_Irecv(&(current.data()(nrow + 1, 1)), nrow, MPI_INT, neighbors[1], 0, comm, &(requests[2]));
-    MPI_Isend(&(current(1, 1)), nrow, MPI_INT, neighbors[1], 0, comm, &(requests[3]));
-
-    //Top Right to Bottom left
-    MPI_Irecv(&(current(nrow + 1, 0)), 1, MPI_INT, neighbors[2], 0, comm, &(requests[4]));
-    MPI_Isend(&(current(1, ncol)), 1, MPI_INT, neighbors[2], 0, comm, &(requests[5]));
-    // int temp1 = 4;
-    // MPI_Isend(&temp1, 1, MPI_INT, neighbors[2], 0, comm, &(requests[5]));
-
-    //Right to Left
-    MPI_Irecv(&(recvL(0)), nrow, MPI_INT, neighbors[3], 0, comm, &(requests[6]));
-    //TODO Add Kokkos parallel for 
-    //pack left and right edges
-    // for(int i=1; i<=nrow; i++){
-    //     sendL(i-1) = current(i, 1);
-    //     sendR(i-1) = current(i, ncol);
-    // }
-    Kokkos::parallel_for("packing", ((unsigned int) nrow) + 1, 
+    // packing (length of edge without ghost cells) 
+    Kokkos::parallel_for("packing Top/Bottom", ((unsigned int) ncol) + 1, 
+        KOKKOS_LAMBDA(const int i){
+            sendT(i) = current(1,    i+1);
+            sendB(i) = current(ncol, i+1);
+        }
+    );
+    Kokkos::parallel_for("packing L/R", ((unsigned int) nrow) + 1,
         KOKKOS_LAMBDA(const int i){
             sendL(i) = current(i+1, 1);
             sendR(i) = current(i+1, ncol);
         }
     );
-    MPI_Isend(&(sendR(0)), nrow, MPI_INT, neighbors[3], 0, comm, &(requests[7]));
 
-    //Left to Right
-    MPI_Irecv(&(recvR(0)), nrow, MPI_INT, neighbors[4], 0, comm, &(requests[8]));
-    MPI_Isend(&(sendL(0)), nrow, MPI_INT, neighbors[4], 0, comm, &(requests[9]));
+    // neighbor top-left
+    MPI_Irecv(recvT.data(), 1, MPI_INT, neighbors[0], 0, comm, &(requests[0]));
+    MPI_Isend(sendT.data(), 1, MPI_INT, neighbors[0], 0, comm, &(requests[1]));
 
-    //Bottom Left to Top Right
-    MPI_Irecv(&(current(0, ncol + 1)), 1, MPI_INT, neighbors[5], 0, comm, &(requests[10]));
-    MPI_Isend(&(current(nrow, 1)),     1, MPI_INT, neighbors[5], 0, comm, &(requests[11]));
-    // int temp2 = 3;
-    // MPI_Isend(&temp2,     1, MPI_INT, neighbors[5], 0, comm, &(requests[11]));
+    // neighbor top
+    MPI_Irecv(recvT.data() + 1, ncol, MPI_INT, neighbors[1], 0, comm, &(requests[2]));
+    MPI_Isend(sendT.data(),     ncol, MPI_INT, neighbors[1], 0, comm, &(requests[3]));
 
-    //Bottom to Top
-    MPI_Irecv(&(current(0, 1)), ncol, MPI_INT, neighbors[6], 0, comm, &(requests[12]));
-    MPI_Isend(&(current(nrow, 1)), ncol, MPI_INT, neighbors[6], 0, comm, &(requests[13]));
+    // neighbor top-right
+    MPI_Irecv(recvT.data() + ncol + 1, 1, MPI_INT, neighbors[2], 0, comm, &(requests[4]));
+    MPI_Isend(sendT.data() + ncol - 1, 1, MPI_INT, neighbors[2], 0, comm, &(requests[5]));
 
-    // cout << "Top Buffer: " << endl;
-    // for(int i=0; i<ncol; i++){
-    //     cout << viewData[0] + 
-    // }
+    // neighbor left
+    MPI_Irecv(recvL.data(), nrow, MPI_INT, neighbors[3], 0, comm, &(requests[6]));
+    MPI_Isend(sendL.data(), nrow, MPI_INT, neighbors[3], 0, comm, &(requests[7]));
 
-    //Bottom Right to Top Left
-    MPI_Irecv(&(current(0, 0)), 1, MPI_INT, neighbors[7], 0, comm, &(requests[14]));
-    MPI_Isend(&(current(nrow, ncol)), 1, MPI_INT, neighbors[7], 0, comm, &(requests[15]));
-    // int temp3 = 2;
-    // MPI_Isend(&temp3, 1, MPI_INT, neighbors[7], 0, comm, &(requests[15]));
+    // neigbhor right
+    MPI_Irecv(recvR.data(), nrow, MPI_INT, neighbors[4], 0, comm, &(requests[8]));
+    MPI_Isend(sendR.data(), nrow, MPI_INT, neighbors[4], 0, comm, &(requests[9]));
+
+    // neighbor bottom-left
+    MPI_Irecv(recvB.data(), 1, MPI_INT, neighbors[5], 0, comm, &(requests[10]));
+    MPI_Isend(sendB.data(), 1, MPI_INT, neighbors[5], 0, comm, &(requests[11]));
+
+    // neighbor below
+    MPI_Irecv(recvB.data() + 1, ncol, MPI_INT, neighbors[6], 0, comm, &(requests[12]));
+    MPI_Isend(sendB.data(),     ncol, MPI_INT, neighbors[6], 0, comm, &(requests[13]));
+
+    // neighbor bottom-right
+    MPI_Irecv(recvB.data() + ncol + 1, 1, MPI_INT, neighbors[7], 0, comm, &(requests[14]));
+    MPI_Isend(sendB.data() + ncol - 1, 1, MPI_INT, neighbors[7], 0, comm, &(requests[15]));
 
     MPI_Waitall(NREQUESTS, requests, MPI_STATUSES_IGNORE);
 
-    //TODO Add Kokkos parallel for 
-    //unpack Right to Left
-    // for(int i=1; i<=nrow; i++){
-    //     current(i, 0)        = recvL(i-1); // Left
-    //     current(i, nrow + 1) = recvR(i-1); // Right 
-    // }
-
-    Kokkos::RangePolicy<Kokkos::CudaSpace> tempPolicy = Kokkos::RangePolicy<Kokkos::CudaSpace>(1, ((unsigned int) nrow) + 1);
-    Kokkos::parallel_for("unpacking", ((unsigned int) nrow) + 1, 
+    // unpack t/b buffers
+    //Kokkos::RangePolicy<Kokkos::CudaSpace> tempPolicy = Kokkos::RangePolicy<Kokkos::CudaSpace>(1, ((unsigned int) nrow) + 1);
+    Kokkos::parallel_for("unpacking top/bottom", ((unsigned int) ncol) + 3, 
         KOKKOS_LAMBDA(const int i){
-            current(i+1, 0)        = recvL(i); // Left
-            current(i+1, nrow + 1) = recvR(i); // Right 
+            current(0, i)        = recvB(i); // Top
+            current(nrow + 1, i) = recvT(i); // Bottom
+        }
+    );
+    // unpack l/r buffers
+    Kokkos::parallel_for("unpacking L/R", ((unsigned int) nrow) + 1, 
+        KOKKOS_LAMBDA(const int i){
+            current(i + 1, 0)        = recvR(i); // Left
+            current(i + 1, ncol + 1) = recvL(i); // Right 
         }
     );
 }
@@ -362,9 +353,13 @@ int main(int argc, char* argv[]) {
 
         //packing views
         Kokkos::View<int*, Kokkos::CudaSpace> sendLView("sendL", localN);
-        Kokkos::View<int*, Kokkos::CudaSpace> recvLView("recvL", localN);
         Kokkos::View<int*, Kokkos::CudaSpace> sendRView("sendR", localN);
+        Kokkos::View<int*, Kokkos::CudaSpace> sendTView("sendT", localN);
+        Kokkos::View<int*, Kokkos::CudaSpace> sendBView("sendB", localN);
+        Kokkos::View<int*, Kokkos::CudaSpace> recvLView("recvL", localN);
         Kokkos::View<int*, Kokkos::CudaSpace> recvRView("recvR", localN);
+        Kokkos::View<int*, Kokkos::CudaSpace> recvTView("recvT", localN+2);
+        Kokkos::View<int*, Kokkos::CudaSpace> recvBView("recvB", localN+2);
         
         // std::cout << "Rank is: " << rank << std::endl;
 
@@ -393,7 +388,8 @@ int main(int argc, char* argv[]) {
 
         for(int i=0; i<iter; i++){
             // Kokkos::deep_copy(currentMirror, current);
-            exchangeGhostsGPU(comm, current, localN, localN, neighbors, sendLView, recvLView, sendRView, recvRView, requests);
+            exchangeGhostsGPU(comm, current, localN, localN, neighbors, sendLView, recvLView, sendRView, recvRView,
+                    sendTView, recvTView, sendBView, recvBView, requests);
             // Kokkos::deep_copy(current, currentMirror);
             Kokkos::parallel_for(Kokkos::MDRangePolicy<Kokkos::Rank<2>>({1,1}, {localN+1,localN+1}), 
             KOKKOS_LAMBDA(const int row, const int col){
